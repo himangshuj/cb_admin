@@ -60,7 +60,15 @@
             {% if datatype == "string" or datatype == "binary" %}
             <td id="{{ record_id }}-{{ key }}">{{ val|truncatewords:8 }}</td>
             {% else %}
+            {% if datatype == "lists" %}
+            <td id="{{ record_id }}-{{ key }}">
+            {% for elem in val %}
+                {{elem}} ,
+                {% endfor %}
+            </td>
+            {% else %}
             <td id="{{ record_id }}-{{ key }}">{{ val }}</td>
+            {% endif %}
             {% endif %}
             {% endif %}
             {% endif %}

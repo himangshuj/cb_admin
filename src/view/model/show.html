@@ -31,7 +31,15 @@
         {% if datatype == "string" or datatype == "binary" %}
         <span id="{{ record.id }}-{{ key }}">{{ val|linebreaksbr }}</span>
         {% else %}
+        {% if datatype == "lists" %}
+        <span id="{{ record.id }}-{{ key }}">
+        {% for elem in val %}
+        {{elem}} ,
+        {% endfor %}
+        </span>
+        {% else %}
         <span id="{{ record.id }}-{{ key }}">{{ val }}</span>
+        {% endif %}
         {% endif %}
         {% endif %}
         <br /><br />
@@ -62,7 +70,7 @@
     </tr>
     </table><br /><br />
     {% endif %}
-    {% endfor %} 
+    {% endfor %}
     <form name="delete" action="{% url action="delete" record_id=record.id %}">
         <input type="submit" value="Delete {{ record.id }}?" />
     </form>

@@ -13,7 +13,7 @@ heartbeat('POST', [WatchName], Authorization) ->
 
 watch('POST', [], Authorization) ->
     TopicString = Req:post_param("topic_string"),
-    {ok, WatchId} = boss_news:watch(TopicString, fun cb_admin_lib:push_update/3, "admin"++SessionID, 60), 
+    {ok, WatchId} = boss_news:watch(TopicString, fun cb_admin_lib:push_update/3, "admin"++SessionID, 60),
     {json, [{watch_id, WatchId}]}.
 
 events('GET', [Since], Authorization) ->
@@ -22,8 +22,8 @@ events('GET', [Since], Authorization) ->
     {json, [{messages, Messages}, {timestamp, Timestamp}]}.
 
 model('GET', [], Authorization) ->
-    {ok, [{model_section, true}, {records, []}, 
-            {models, boss_web:get_all_models()}, 
+    {ok, [{model_section, true}, {records, []},
+            {models, boss_web:get_all_models()},
             {this_model, ""}, {topic_string, ""},
             {timestamp, now()}]};
 model('GET', [ModelName], Authorization) ->
@@ -31,13 +31,14 @@ model('GET', [ModelName], Authorization) ->
 model('GET', [ModelName, PageName], Authorization) ->
     Page = list_to_integer(PageName),
     Model = list_to_atom(ModelName),
+    ModelsPropLists = get_list_elements(Model),
     RecordCount = boss_db:count(Model),
-    Records = boss_db:find(Model, [], [{limit, ?RECORDS_PER_PAGE}, 
+    Records = boss_db:find(Model, [], [{limit, ?RECORDS_PER_PAGE},
             {offset, (Page - 1) * ?RECORDS_PER_PAGE}, descending]),
     TopicString = string:join(lists:map(fun(Record) -> Record:id() ++ ".*" end, Records), ", "),
     AttributesWithDataTypes = lists:map(fun(Record) ->
                 {Record:id(), lists:map(fun({Key, Val}) ->
-                            {Key, Val, boss_db:data_type(Key, Val)}
+      {Key, Val, proplists:get_value(Key, ModelsPropLists, boss_db:data_type(Key, Val))}
                     end, Record:attributes())}
         end, Records),
     AttributeNames = case length(Records) of
@@ -45,12 +46,18 @@ model('GET', [ModelName, PageName], Authorization) ->
         _ -> (lists:nth(1, Records)):attribute_names()
     end,
     Pages = lists:seq(1, ((RecordCount-1) div ?RECORDS_PER_PAGE)+1),
-    {ok, 
-        [{records, AttributesWithDataTypes}, {attribute_names, AttributeNames}, 
-            {models, boss_web:get_all_models()}, {this_model, ModelName}, 
+    {ok,
+        [{records, AttributesWithDataTypes}, {attribute_names, AttributeNames},
+            {models, boss_web:get_all_models()}, {this_model, ModelName},
             {pages, Pages}, {this_page, Page}, {model_section, true},
-            {topic_string, TopicString}, {timestamp, boss_mq:now("admin"++SessionID)}], 
+            {topic_string, TopicString}, {timestamp, boss_mq:now("admin"++SessionID)}],
         [{"Cache-Control", "no-cache"}]}.
+
+get_list_elements(Model) ->
+    ModelAttributes = apply(Model, module_info, [attributes]),
+    ModelLists = proplists:get_value(list_fields, ModelAttributes, []),
+    ModelsPropLists = lists:map(fun(K) -> {K, "lists"} end, ModelLists),
+    ModelsPropLists.
 
 csv('GET', [ModelName], Authorization) ->
     Model = list_to_atom(ModelName),
@@ -69,7 +76,7 @@ csv('GET', [ModelName], Authorization) ->
                                 [cb_admin_model_lib:encode_csv_value(Val), ","|Acc]
                         end, [], Record:attributes()), "\n"]
         end, Records),
-    {output, [FirstLine, RecordLines], [{"Content-Type", "text/csv"}, 
+    {output, [FirstLine, RecordLines], [{"Content-Type", "text/csv"},
             {"Content-Disposition", "attachment;filename="++ModelName++".csv"}]}.
 
 upload('GET', [ModelName], Authorization) ->
@@ -99,17 +106,27 @@ upload('POST', [ModelName], Authorization) ->
 
 show('GET', [RecordId], Authorization) ->
     Record = boss_db:find(RecordId),
+    Module = element(1, Record),
+    ModelsPropLists = get_list_elements(Module),
     AttributesWithDataTypes = lists:map(fun({Key, Val}) ->
-                {Key, Val, boss_db:data_type(Key, Val)}
+    {Key, Val, proplists:get_value(Key, ModelsPropLists, boss_db:data_type(Key, Val))}
         end, Record:attributes()),
-    {ok, [{'record', Record}, {'attributes', AttributesWithDataTypes}, 
+    {ok, [{'record', Record}, {'attributes', AttributesWithDataTypes},
             {'type', boss_db:type(RecordId)}, {timestamp, boss_mq:now("admin"++SessionID)}]}.
 
 edit('GET', [RecordId], Authorization) ->
     Record = boss_db:find(RecordId),
-    {ok, [{'record', Record}]};
+    Module = element(1, Record),
+    ModelsPropLists = get_list_elements(Module),
+    AttributesWithDataTypes = lists:map(fun({Key, Val}) ->
+    {Key, Val, proplists:get_value(Key, ModelsPropLists, boss_db:data_type(Key, Val))}
+    end,
+    Record:attributes()),
+    {ok, [{'record', Record}, {'attributes', AttributesWithDataTypes}]};
 edit('POST', [RecordId], Authorization) ->
     Record = boss_db:find(RecordId),
+    Module = element(1, Record),
+    ModelsPropLists = get_list_elements(Module),
     NewRecord = lists:foldr(fun
             ('id', Acc) ->
                 Acc;
@@ -121,9 +138,19 @@ edit('POST', [RecordId], Authorization) ->
                         case Val of "now" -> Acc:set(Attr, erlang:now());
                             _ -> Acc
                         end;
-                    false -> Acc:set(Attr, Val)
-                end
-        end, Record, Record:attribute_names()),
+                    false ->
+                      case proplists:get_value(Attr, ModelsPropLists, false) of
+                      "lists" ->
+                        Val1 = string:tokens(Val, ","),
+                        lager:info("Tokens are ~p", [Val1]),
+                        {TrimmedVals, _} = lists:split(length(Val1) - 1, Val1),
+                        lager:info("List Val is ~p", [TrimmedVals]),
+                        Acc:set(Attr, lists:map(fun(V) -> list_to_bitstring(string:strip(V)) end, TrimmedVals));
+                        false -> Acc:set(Attr, Val)
+                      end
+                 end
+        end,
+    Record, Record:attribute_names()),
     case NewRecord:save() of
         {ok, SavedRecord} ->
             {redirect, [{action, "show"}, {record_id, RecordId}]};
@@ -142,6 +169,7 @@ create(Method, [RecordType], Authorization) ->
     case lists:member(RecordType, boss_web:get_all_models()) of
         true ->
             Module = list_to_atom(RecordType),
+            ModelsPropLists = get_list_elements(Module),
             DummyRecord = boss_record_lib:dummy_record(Module),
             case Method of
                 'GET' ->
@@ -158,7 +186,14 @@ create(Method, [RecordType], Authorization) ->
                                                 "now" -> erlang:now();
                                                 _ -> ""
                                             end;
-                                        _ -> Val
+                                        _ ->
+                                          case proplists:get_value(Attr, ModelsPropLists, false) of
+                                            "lists" ->
+                                              ValToken = string:tokens(Val, ","),
+                                              {TrimmedVals, _} = lists:split(length(ValToken) - 1, ValToken),
+                                              lists:map(fun(V) -> list_to_bitstring(string:strip(V)) end, TrimmedVals);
+                                            false -> Val
+                                          end
                                     end,
                                     Acc:set(Attr, Val1)
                             end, DummyRecord, DummyRecord:attribute_names()),

@@ -12,13 +12,21 @@
 {% endif %}
 <form name="edit" action="{% url action="edit" record_id=record.id %}" method="post">
 <table>
-    {% for key, val in record.attributes %}
+    {% for key, val, datatype in attributes %}
     {% ifnotequal key "id" %}
-    {% if "_time" in key %}
+    {% if datatype == "datetime" %}
     <tr><td>{{ key }}</td><td><input type="radio" name="{{ key }}" value="now" id="{{ key }}_now" /><label for="{{ key }}_now">Now</label>
             &nbsp; <input type="radio" name="{{ key }}" value="null" id="{{ key }}_null" checked="checked" /><label for="{{ key }}_null">{% if val %}{{ val|date }} {{ val|time }}{% else %}Null{% endif %}</label>
     {% else %}
+    {% if  datatype == "lists" %}
+    <tr><td><label for="{{ key }}_textarea">{{ key }}</label></td><td><textarea id="{{ key }}_textarea" name="{{ key }}">
+    {% for elem in val %}{{ elem|escape }},{%endfor %}
+
+    </textarea></td></tr>
+
+    {% else %}
     <tr><td><label for="{{ key }}_textarea">{{ key }}</label></td><td><textarea id="{{ key }}_textarea" name="{{ key }}">{{ val|escape }}</textarea></td></tr>
+    {% endif %}
     {% endif %}
     {% endifnotequal %}
     {% endfor %}
