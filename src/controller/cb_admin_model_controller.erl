@@ -36,8 +36,15 @@ model('GET', [ModelName, PageName], Authorization) ->
             {offset, (Page - 1) * ?RECORDS_PER_PAGE}, descending]),
     TopicString = string:join(lists:map(fun(Record) -> Record:id() ++ ".*" end, Records), ", "),
     AttributesWithDataTypes = lists:map(fun(Record) ->
-                {Record:id(), lists:map(fun({Key, Val}) ->
-                            {Key, Val, boss_db:data_type(Key, Val)}
+                {Record:id(),
+                 lists:map(fun({Key, Val}) ->
+                               DataType = boss_db:data_type(Key, Val),
+                               case DataType of
+                                 "foreign_id" -> {Key, Val, DataType};
+                                 "id" -> {Key, Val, DataType};
+                                 "datetime" -> {Key, Val, DataType};
+                                 _ -> {Key, jsx:encode(Val), DataType}
+                               end
                     end, Record:attributes())}
         end, Records),
     AttributeNames = case length(Records) of
@@ -99,15 +106,31 @@ upload('POST', [ModelName], Authorization) ->
 
 show('GET', [RecordId], Authorization) ->
     Record = boss_db:find(RecordId),
-    AttributesWithDataTypes = lists:map(fun({Key, Val}) ->
-                {Key, Val, boss_db:data_type(Key, Val)}
+    AttributesWithDataTypes =
+    lists:map(fun({Key, Val}) ->
+                  DataType = boss_db:data_type(Key, Val),
+                  case DataType of
+                    "foreign_id" -> {Key, Val, DataType};
+                    "id" -> {Key, Val, DataType};
+                    "datetime" -> {Key, Val, DataType};
+                    _ -> {Key, jsx:encode(Val), DataType}
+                  end
         end, Record:attributes()),
     {ok, [{'record', Record}, {'attributes', AttributesWithDataTypes}, 
             {'type', boss_db:type(RecordId)}, {timestamp, boss_mq:now("admin"++SessionID)}]}.
 
 edit('GET', [RecordId], Authorization) ->
     Record = boss_db:find(RecordId),
-    {ok, [{'record', Record}]};
+    {ok, [{'record', Record},
+          {'attrs', lists:map(fun({Key, Val}) ->
+                                  DataType = boss_db:data_type(Key, Val),
+                                  case DataType of
+                                    "foreign_id" -> {Key, Val};
+                                    "id" -> {Key, Val};
+                                    "datetime" -> {Key, Val};
+                                    _ -> {Key, jsx:encode(Val)}
+                                  end
+                              end, Record:attributes())}]};
 edit('POST', [RecordId], Authorization) ->
     Record = boss_db:find(RecordId),
     NewRecord = lists:foldr(fun
@@ -121,7 +144,14 @@ edit('POST', [RecordId], Authorization) ->
                         case Val of "now" -> Acc:set(Attr, erlang:now());
                             _ -> Acc
                         end;
-                    false -> Acc:set(Attr, Val)
+                    false -> DataType = boss_db:data_type(Attr,
+                                                          apply(Record, Attr, [])),
+                             case DataType of
+                               "foreign_id" -> Acc:set(Attr, Val);
+                               "id" -> Acc:set([]);
+                               "datetime" -> Acc:set([]);
+                               _ -> Acc:set(Attr, jsx:decode(list_to_binary(Val)))
+                             end
                 end
         end, Record, Record:attribute_names()),
     case NewRecord:save() of
