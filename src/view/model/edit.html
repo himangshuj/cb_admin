@@ -12,7 +12,7 @@
 {% endif %}
 <form name="edit" action="{% url action="edit" record_id=record.id %}" method="post">
 <table>
-    {% for key, val in record.attributes %}
+    {% for key, val in attrs %}
     {% ifnotequal key "id" %}
     {% if "_time" in key %}
     <tr><td>{{ key }}</td><td><input type="radio" name="{{ key }}" value="now" id="{{ key }}_now" /><label for="{{ key }}_now">Now</label>
