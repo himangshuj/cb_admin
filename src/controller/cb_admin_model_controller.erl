@@ -188,7 +188,13 @@ create(Method, [RecordType], Authorization) ->
                                                 "now" -> erlang:now();
                                                 _ -> ""
                                             end;
-                                        _ -> Val
+                                        _ -> DataType = boss_db:data_type(Attr, Val),
+                                             case DataType of
+                                               "foreign_id" -> Val;
+                                               "id" -> Val;
+                                               "datetime" -> Val;
+                                               _ -> jsx:decode(list_to_binary(Val))
+                                             end
                                     end,
                                     Acc:set(Attr, Val1)
                             end, DummyRecord, DummyRecord:attribute_names()),
